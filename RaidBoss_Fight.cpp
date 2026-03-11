@@ -27,18 +27,20 @@ struct Player {
 
 //функция для потокобезопасного логиравания
 void Log(const char* messege) {
-    WaitForSingleObject(hConsolwMutex, INFINITE);
+    WaitForSingleObject(hConsoleMutex, INFINITE);
     printf("%s\n", messege);
-    ReleaseMutex(hConsolwMutex);
+    ReleaseMutex(hConsoleMutex);
 }
 
 Bayum boss;
 
 Player players[MaxPlayers];
 int playersCount;
+DWORD lastAttackTime[MaxPlayers];
+long totalDamagePlayer[MaxPlayers] = { 0 };
 
 HANDLE hMutex;
-HANDLE hConsolwMutex;
+HANDLE hConsoleMutex;
 
 HANDLE hBossSpecialAttackEvent;
 HANDLE HGameOverEvent;
@@ -48,10 +50,13 @@ bool gameOver;
 
 char logBuff[256];
 
+
+
+
 DWORD WINAPI BossThread(LPVOID lpParam) {
     DWORD lastSpecialAttack = GetTickCount(); 
-    DWORD lastAttack = GetTickCount();
 
+    DWORD lastAttack = GetTickCount();
     while (bossAlive) {
         //ожиданеие следующей атаки
         DWORD now = GetTickCount();
@@ -153,6 +158,57 @@ DWORD WINAPI BossThread(LPVOID lpParam) {
     }
 }
 
+
+DWORD WINAPI PlayersThread(LPVOID lpParam) {
+    int indx = *(int*)lpParam;
+    delete (int*)lpParam;
+    DWORD playerslastAttack = GetTickCount();
+    char localLogBuff[256];
+    while (players[indx].health > 0 && bossAlive && !gameOver) {
+
+        if (WaitForSingleObject(HGameOverEvent, 0) == WAIT_OBJECT_0) {
+            break;
+        }
+
+        if (WaitForSingleObject(hBossSpecialAttackEvent, 0) == WAIT_OBJECT_0) {
+            continue;
+        }
+
+        DWORD now = GetTickCount();
+        DWORD nextAttack = playerslastAttack + players[indx].attackCooldown * 1000;
+        if (now < nextAttack) {
+            Sleep(100);
+            continue;
+        }
+        WaitForSingleObject(hMutex, INFINITE);
+        if (players[indx].health <= 0 || !bossAlive || gameOver) {
+            ReleaseMutex(hMutex);
+            break;
+        }
+        int playersDamage = players[indx].damage * (100 - boss.resist) / 100;
+        boss.health = -playersDamage;
+
+        totalDamagePlayer[indx] += playersDamage;
+        sprintf(localLogBuff, "[ИГРОК %s] Атакует босса, нанося %d урона (у босса осталось HP: %ld", players[indx].name, playersDamage, boss.health);
+        Log(localLogBuff);
+        playerslastAttack = GetTickCount();
+
+        if (boss.health <= 0) {
+            bossAlive = false;
+            gameOver = true;
+            SetEvent(HGameOverEvent);
+            Log("[ИГРА] Босс убит! Победа!");
+        }
+        ReleaseMutex(hMutex);
+        if (players[indx].health <= 0) {
+            sprintf(localLogBuff, "[ИГРОК %s] Погиб.", players[idx].name);
+            Log(localLogBuff);
+        }
+        return 0;
+    }
+}
+
 int main()
 {
+
 }
